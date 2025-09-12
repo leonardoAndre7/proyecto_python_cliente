@@ -1,0 +1,18 @@
+{% extends "banco/base.html" %}
+{% block content %}
+<div class="card p-4">
+  <h4>Resultado de importación</h4>
+  <p>Registros guardados: <strong>{{ saved }}</strong></p>
+  {% if errors %}
+    <div class="alert alert-danger">
+      <h6>Errores</h6>
+      <ul>
+        {% for e in errors %}
+          <li>{{ e }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+  <a href="{% url 'banco:importar_excel' %}" class="btn btn-primary">Importar otro archivo</a>
+</div>
+{% endblock %}

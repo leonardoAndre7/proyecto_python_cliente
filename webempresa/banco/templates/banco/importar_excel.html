@@ -1,0 +1,45 @@
+{% extends "banco/base.html" %}
+{% block title %}Importar BCP{% endblock %}
+
+{% block content %}
+<div class="card p-4">
+  <h4 class="mb-3">Importar archivo del banco (BCP)</h4>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label">Archivo (.xlsx)</label>
+        {{ form.archivo }}
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">Cliente por defecto</label>
+        {{ form.cliente }}
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">Tarifa por defecto</label>
+        {{ form.tarifa }}
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">Saldo inicial (por defecto)</label>
+        {{ form.saldo_inicial }}
+      </div>
+
+      <div class="col-12 mt-3">
+        <button class="btn btn-primary">Previsualizar</button>
+        <a class="btn btn-outline-secondary" href="{% url 'admin:index' %}">Admin</a>
+      </div>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  $(document).ready(function(){
+    $('select').select2({ width: '100%' });
+  });
+</script>
+{% endblock %}
