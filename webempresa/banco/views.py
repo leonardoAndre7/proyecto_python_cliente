@@ -8,6 +8,11 @@ from .forms import UploadExcelForm
 from .models import BCP, TarifaOperacion, Cliente
 from django.urls import reverse
 import re
+import openpyxl
+from decimal import Decimal
+import pandas as pd
+import re
+from .models import Cliente, TarifaOperacion
 
 def importar_excel(request):
     """
@@ -35,7 +40,6 @@ def importar_excel(request):
                 fecha_valuta_raw = r.get("FECHA_VALUTA") or r.get("FECHA_VAL") or None
 
                 def safe_fecha(f):
-                    """Convierte NaT o valores inválidos a None, si no devuelve fecha."""
                     try:
                         if pd.isna(f):
                             return None
@@ -63,38 +67,36 @@ def importar_excel(request):
                 dni_encontrado = match.group(1) if match else None
 
                 # Inicializamos datos del cliente
-                cliente_auto = None
-                cliente_nombre = ""
-                cliente_apellidos = ""
-                correo = ""
-                celular = ""
-                status = ""
-                provincia = ""
-                codigo_referido = ""
-                nombre_referido = ""
-                cuenta_banco_referido = ""
-                cuenta_interbancario_referido = ""
-
                 cliente_obj = None
                 if dni_encontrado:
                     cliente_obj = Cliente.objects.filter(dni=dni_encontrado).first()
 
-                # Si no se encontró por DNI, usa cliente default del formulario
                 if not cliente_obj and cliente_default:
                     cliente_obj = cliente_default
 
-                # Asignar datos automáticamente
-                cliente_auto = cliente_obj.COD_CLIENTE if cliente_obj else ""
-                cliente_nombre = f"{cliente_obj.NOMBRE} {cliente_obj.APELLIDOS}" if cliente_obj else ""
-                correo = cliente_obj.CORREO or "" if cliente_obj else ""
-                celular = cliente_obj.CELULAR or "" if cliente_obj else ""
-                status = cliente_obj.STATUS or "" if cliente_obj else ""
-                provincia = cliente_obj.PROVINCIA or "" if cliente_obj else ""
-                codigo_referido = cliente_obj.CODIGO_REFERIDO or "" if cliente_obj else ""
-                nombre_referido = cliente_obj.NOMBRE_REFERIDO or "" if cliente_obj else ""
-                cuenta_banco_referido = cliente_obj.CUENTA_BANCO_REFERIDO or "" if cliente_obj else ""
-                cuenta_interbancario_referido = cliente_obj.CUENTA_INTERBANCARIO_REFERIDO or "" if cliente_obj else ""
+                # Inicializamos datos de tarifa
+                # Inicializamos datos de tarifa
+                tarifa_obj = None
+                if cliente_obj and cliente_obj.cod_tarifa:
+                    tarifa_obj = TarifaOperacion.objects.filter(cod_tarifa=cliente_obj.cod_tarifa).first()
 
+                if not tarifa_obj and tarifa_default:
+                    tarifa_obj = tarifa_default
+
+
+                # Crear objeto temporal BCP para cálculos
+                bcp_temp = BCP(
+                monto=monto,
+                cliente=cliente_obj,
+                tarifa=tarifa_obj,
+            )
+
+
+                # Asignar saldo inicial al atributo temporal
+                bcp_temp._saldo_inicial = saldo_inicial_default
+
+                # Calcular saldo, comisión y lm_pagar
+                bcp_temp.calcular_datos()
 
                 # Diccionario de fila para preview
                 row = {
@@ -109,21 +111,31 @@ def importar_excel(request):
                     "usuario": r.get("USUARIO") or "",
                     # Datos automáticos del cliente
                     "dni_cliente": dni_encontrado,
-                    "cliente_default": cliente_auto or (cliente_default.COD_CLIENTE if cliente_default else ""),
-                    "cliente_nombre": cliente_obj.NOMBRE if cliente_obj else "",
-                    "cliente_apellidos": cliente_obj.APELLIDOS if cliente_obj else "",
-                    "correo": cliente_obj.CORREO or "" if cliente_obj else "",
-                    "celular": cliente_obj.CELULAR or "" if cliente_obj else "",
-                    "status": cliente_obj.STATUS or "" if cliente_obj else "",
-                    "provincia": cliente_obj.PROVINCIA or "" if cliente_obj else "",
-                    "codigo_referido": cliente_obj.CODIGO_REFERIDO or "" if cliente_obj else "",
-                    "nombre_referido": cliente_obj.NOMBRE_REFERIDO or "" if cliente_obj else "",
-                    "cuenta_banco_referido": cliente_obj.CUENTA_BANCO_REFERIDO or "" if cliente_obj else "",
-                    "cuenta_interbancario_referido": cliente_obj.CUENTA_INTERBANCARIO_REFERIDO or "" if cliente_obj else "",
-                    "tarifa_default": tarifa_default.cod_tarifa if tarifa_default else "",
+                    "cliente_default": cliente_obj.cod_cliente if cliente_obj else "",
+                    "cliente_nombre": cliente_obj.nombre if cliente_obj else "",
+                    "cliente_apellidos": cliente_obj.apellidos if cliente_obj else "",
+                    "correo": cliente_obj.correo or "" if cliente_obj else "",
+                    "celular": cliente_obj.celular or "" if cliente_obj else "",
+                    "status": cliente_obj.status or "" if cliente_obj else "",
+                    "provincia": cliente_obj.provincia or "" if cliente_obj else "",
+                    "codigo_referido": cliente_obj.codigo_referido or "" if cliente_obj else "",
+                    "nombre_referido": cliente_obj.nombre_referido or "" if cliente_obj else "",
+                    "cuenta_banco_referido": cliente_obj.cuenta_banco_referido or "" if cliente_obj else "",
+                    "cuenta_interbancario_referido": cliente_obj.cuenta_interbancario_referido or "" if cliente_obj else "",
+                    #faltan esos 2
+                    "costo_por_porcentaje": tarifa_obj.costo_por_porcentaje if tarifa_obj else 0,
+                    "costo_fijo": tarifa_obj.costo_fijo if tarifa_obj else 0,
+                    #faltan los 2 de arriba
+                    # Datos calculados automáticamente
+                    "saldo": f"{bcp_temp.saldo:.2f}",
+                    "comision": f"{bcp_temp.comision:.2f}",
+                    "lm_pagar": f"{bcp_temp.lm_pagar:.2f}",
+                    "tarifa_default": tarifa_obj.cod_tarifa if tarifa_obj else "",
                     "saldo_inicial_default": saldo_inicial_default,
-                }
+                    "Ganancia_Referido": f"{bcp_temp.ganancia_referido:.2f}",
 
+                    "cod_tarifa": cliente_obj.cod_tarifa or "" if cliente_obj else "",
+                }
 
                 rows.append(row)
 
@@ -141,6 +153,41 @@ def importar_excel(request):
         form = UploadExcelForm()
 
     return render(request, "banco/importar_excel.html", {"form": form})
+
+def exportar_excel(request):
+    # Crear un libro de Excel
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Clientes"
+
+    # Cabeceras
+    columnas = [
+        "cod_cliente", "nombre", "apellidos", "dni", "celular", 
+        "correo", "cod_tarifa", "codigo_referido", "status"
+    ]
+    ws.append(columnas)
+
+    # Filas con datos
+    for cliente in Cliente.objects.all():
+        ws.append([
+            cliente.cod_cliente,
+            cliente.nombre,
+            cliente.apellidos,
+            cliente.dni,
+            cliente.celular,
+            cliente.correo,
+            cliente.cod_tarifa,
+            cliente.codigo_referido,
+            cliente.status,
+        ])
+
+    # Preparar respuesta HTTP
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="clientes.xlsx"'
+    wb.save(response)
+    return response
 
 @transaction.atomic
 def confirmar_import(request):
