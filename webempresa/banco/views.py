@@ -1,6 +1,10 @@
 import os
+from django.http import HttpResponse
 from decimal import Decimal
 import pandas as pd
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import render, redirect
 from django.conf import settings
 from django.db import transaction
@@ -9,10 +13,12 @@ from .models import BCP, TarifaOperacion, Cliente
 from django.urls import reverse
 import re
 import openpyxl
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from decimal import Decimal
 import pandas as pd
-import re
 from .models import Cliente, TarifaOperacion
+
+
 
 def importar_excel(request):
     """
@@ -154,38 +160,83 @@ def importar_excel(request):
 
     return render(request, "banco/importar_excel.html", {"form": form})
 
+
 def exportar_excel(request):
-    # Crear un libro de Excel
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Clientes"
+    ws.title = "BCP"
 
-    # Cabeceras
-    columnas = [
-        "cod_cliente", "nombre", "apellidos", "dni", "celular", 
-        "correo", "cod_tarifa", "codigo_referido", "status"
-    ]
-    ws.append(columnas)
-
-    # Filas con datos
-    for cliente in Cliente.objects.all():
-        ws.append([
-            cliente.cod_cliente,
-            cliente.nombre,
-            cliente.apellidos,
-            cliente.dni,
-            cliente.celular,
-            cliente.correo,
-            cliente.cod_tarifa,
-            cliente.codigo_referido,
-            cliente.status,
-        ])
-
-    # Preparar respuesta HTTP
-    response = HttpResponse(
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    # Estilos
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    center_alignment = Alignment(horizontal="center", vertical="center")
+    money_format = "#,##0.00"
+    thin_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
     )
-    response["Content-Disposition"] = 'attachment; filename="clientes.xlsx"'
+
+    # Encabezados
+    headers = [
+        "Código BCP", "Fecha", "Fecha Valuta", "Descripción", 
+        "Monto", "Sucursal/Agencia", "N° Operación", "Usuario",
+        "Saldo", "Comisión", "LM Pagar", "Código", "Ganancia Referido",
+        "Cliente", "Tarifa"
+    ]
+    ws.append(headers)
+
+    for col_num, _ in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center_alignment
+        cell.border = thin_border
+
+    # Filas de datos
+    for i, bcp in enumerate(BCP.objects.all(), start=2):
+        row = [
+            bcp.cod_bcp,
+            bcp.fecha,
+            bcp.fecha_valuta,
+            bcp.descripcion,
+            float(bcp.monto or 0),
+            bcp.sucursal_agencia,
+            bcp.n_operacion,
+            bcp.usuario,
+            float(bcp.saldo or 0),
+            float(bcp.comision or 0),
+            float(bcp.lm_pagar or 0),
+            bcp.codigo,
+            float(bcp.ganancia_referido or 0),
+            bcp.cliente.cod_cliente if bcp.cliente else "",
+            bcp.tarifa.cod_tarifa if bcp.tarifa else ""
+        ]
+        ws.append(row)
+
+        # Aplicar bordes y formato monetario
+        for col_num, value in enumerate(row, 1):
+            cell = ws.cell(row=i, column=col_num)
+            cell.border = thin_border
+            if col_num in [5, 9, 10, 11, 13]:  # columnas de dinero
+                cell.number_format = money_format
+
+        # Efecto zebra
+        if i % 2 == 0:
+            for col_num in range(1, len(row)+1):
+                ws.cell(row=i, column=col_num).fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+
+    # Ajuste automático de ancho
+    for col in ws.columns:
+        max_length = max(len(str(cell.value)) if cell.value else 0 for cell in col) + 2
+        ws.column_dimensions[col[0].column_letter].width = max_length
+
+    # Respuesta HTTP
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = 'attachment; filename="BCP.xlsx"'
     wb.save(response)
     return response
 
@@ -240,7 +291,7 @@ def confirmar_import(request):
             saldo_inicial = Decimal(saldo_inicial_list[i].replace(",", "")) if saldo_inicial_list[i] else Decimal('0.00')
             codigo = codigo_list[i] if i < len(codigo_list) else ""
 
-            cliente_obj = Cliente.objects.filter(COD_CLIENTE=cliente_list[i]).first() if cliente_list and cliente_list[i] else None
+            cliente_obj = Cliente.objects.filter(cod_cliente=cliente_list[i]).first() if cliente_list and cliente_list[i] else None
             tarifa_obj = TarifaOperacion.objects.filter(cod_tarifa=tarifa_list[i]).first() if tarifa_list and tarifa_list[i] else None
 
             if cod_bcp and BCP.objects.filter(cod_bcp=cod_bcp).exists():

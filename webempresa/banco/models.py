@@ -1,5 +1,6 @@
 from django.db import models  # Importa el módulo de modelos de Django
 from decimal import Decimal
+from django.db.models import Max
 from django.core.exceptions import ObjectDoesNotExist
 
 class Cliente(models.Model):
@@ -24,6 +25,8 @@ class Cliente(models.Model):
     class Meta:
         managed = False   # ❌ muy importante: Django no intentará crear ni modificar esta tabla
         db_table = "CLIENTE"
+
+
 
     def __str__(self):
         return f"{self.cod_cliente} - {self.nombre} {self.apellidos}"
@@ -54,7 +57,7 @@ class TarifaOperacion(models.Model):
 # Modelo BCP (Banco de Crédito del Perú)
 class BCP(models.Model):
     # Código único de la operación
-    cod_bcp = models.CharField(max_length=100, unique=True)
+    cod_bcp = models.CharField(max_length=100, unique=True, blank=True, null=True, db_column="COD_BCP")
     # Fecha de la operación
     fecha = models.DateField(blank=True, null=True)
     # Fecha de valuta
@@ -79,6 +82,10 @@ class BCP(models.Model):
 
     #cod_tarifa = models.CharField(max_length=100, blank=True, null=True )
 
+    class Meta:
+        managed =  True
+        db_table = "BCP"
+
     # Relación con cliente y tarifa
     cliente = models.ForeignKey(
         Cliente,
@@ -95,6 +102,23 @@ class BCP(models.Model):
 
     # Campo temporal (no existe en la base de datos) para manejar saldo inicial
     _saldo_inicial = 0  
+
+    def save(self, *args, **kwargs):
+        if not self.cod_bcp:  # Solo si aún no tiene código
+            last_bcp = BCP.objects.order_by('-id').first()
+            if last_bcp and last_bcp.cod_bcp:
+                try:
+                    last_number = int(last_bcp.cod_bcp.replace("BCP", ""))
+                except ValueError:
+                    last_number = 0
+            else:
+                last_number = 0
+            self.cod_bcp = f"BCP{last_number + 1:03d}"
+
+        super().save(*args, **kwargs)  # Aquí recién guarda
+
+    def __str__(self):
+        return f"{self.cod_bcp} - {self.descripcion}"
 
     @property
     def saldo_inicial(self):
